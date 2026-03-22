@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { MOCK_RESEARCH } from "@/lib/mockData";
 
 export async function POST(req: NextRequest) {
   const { task, insurance } = await req.json();
 
   if (!process.env.PERPLEXITY_API_KEY) {
-    // Simulate delay for demo effect
-    await new Promise((r) => setTimeout(r, 1500));
-    return NextResponse.json(MOCK_RESEARCH);
+    return NextResponse.json({ error: "PERPLEXITY_API_KEY not configured" }, { status: 500 });
   }
 
   try {
@@ -55,9 +52,9 @@ Return only valid JSON, no markdown.`,
       const parsed = JSON.parse(content);
       return NextResponse.json(parsed);
     } catch {
-      return NextResponse.json(MOCK_RESEARCH);
+      return NextResponse.json({ error: "Failed to parse research response" }, { status: 500 });
     }
-  } catch {
-    return NextResponse.json(MOCK_RESEARCH);
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }

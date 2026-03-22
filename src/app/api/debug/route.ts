@@ -15,5 +15,12 @@ export async function GET(req: NextRequest) {
     extracted: callData.extracted,
     patient: callData.patient,
     processingSteps: callData.processingSteps,
+    agentResults: callData.agentResults,
+    diagnosisSummary: callData.diagnosisSummary,
+    orchestrationStatus: callData.orchestrationStatus,
+    orchestrationProgress: callData.orchestrationProgress,
+    procedures: callData.procedures,
+    causes: callData.causes,
+    patientDocument: callData.patientDocument,
   });
 }

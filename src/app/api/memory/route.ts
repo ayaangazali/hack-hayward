@@ -6,10 +6,10 @@ export async function POST(req: NextRequest) {
 
   if (action === "save") {
     if (!process.env.MEMV_API_KEY) {
-      // Mock: return a generated ID
       return NextResponse.json({
         success: true,
         patientId: patientProfile.id || `PAT-${Date.now()}`,
+        note: "MEMV_API_KEY not configured",
       });
     }
 

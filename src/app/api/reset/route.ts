@@ -16,5 +16,12 @@ export async function POST() {
   callData.patient = null;
   callData.processingSteps.length = 0;
   callData.rawEvents.length = 0;
+  callData.agentResults.length = 0;
+  callData.diagnosisSummary = null;
+  callData.orchestrationStatus = "idle";
+  callData.orchestrationProgress = 0;
+  callData.procedures.length = 0;
+  callData.causes.length = 0;
+  callData.patientDocument = null;
   return NextResponse.json({ ok: true });
 }

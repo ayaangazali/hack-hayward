@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { callData } from "@/lib/debugStore";
 import { lookupByPhone, lookupByName, queryMemvAI } from "@/lib/memvLookup";
 
+const GEMINI_KEY = process.env.GOOGLE_GEMINI_API_KEY;
+
 function setStep(id: string, status: "active" | "done" | "error", detail?: string) {
   const step = callData.processingSteps.find((s) => s.id === id);
   if (step) {
@@ -10,8 +12,94 @@ function setStep(id: string, status: "active" | "done" | "error", detail?: strin
   }
 }
 
+async function triggerOrchestration() {
+  try {
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : "http://localhost:3000";
+    await fetch(`${baseUrl}/api/orchestrate`, { method: "POST" });
+  } catch {
+    // Orchestration runs independently
+  }
+}
+
+async function generatePatientDocument() {
+  if (!GEMINI_KEY) return;
+
+  const transcript = callData.transcript.map((t) => `${t.role}: ${t.text}`).join("\n");
+  const memories = callData.patient?.retrieved_memories?.join("\n") || "None";
+
+  const prompt = `You are generating a comprehensive patient medical document from a healthcare call. Use ALL available data.
+
+TRANSCRIPT:
+${transcript}
+
+PATIENT RECORD:
+Name: ${callData.extracted.name || "Unknown"}
+Location: ${callData.extracted.location || "Unknown"}
+Situation: ${callData.extracted.situation || "Unknown"}
+Medical Notes: ${callData.extracted.medicalNotes || "Unknown"}
+Action Needed: ${callData.extracted.actionNeeded || "Unknown"}
+
+MEM[V] HISTORY:
+${memories}
+
+Generate a complete PatientData JSON object with these fields. Infer reasonable values from context. Use "Unknown" for truly unavailable data:
+{
+  "name": "<full name>",
+  "dob": "<MM/DD/YYYY or Unknown>",
+  "age": <number>,
+  "sex": "<Male/Female/Unknown>",
+  "mrn": "<MRN-XXXX generated>",
+  "phone": "<phone or Unknown>",
+  "location": "<location>",
+  "bloodType": "<type or Unknown>",
+  "weight": "<weight or Unknown>",
+  "height": "<height or Unknown>",
+  "bmi": "<bmi or Unknown>",
+  "emergencyContact": {"name": "<name>", "phone": "<phone>", "relation": "<relation>"},
+  "insurance": {"provider": "<provider>", "planName": "<plan>", "memberId": "<id>", "groupNumber": "<group>"},
+  "allergies": [{"name": "<allergen>", "severity": "High|Medium|Low", "reaction": "<reaction>", "year": "<year>"}],
+  "medications": [{"name": "<med>", "dosage": "<dose>", "frequency": "<freq>", "prescriber": "<dr>", "indication": "<indication>"}],
+  "vitals": [{"label": "<label>", "value": "<value>", "unit": "<unit>", "status": "normal|warning|critical"}],
+  "conditions": ["<condition 1>", ...],
+  "labResults": [{"test": "<test>", "value": "<value>", "range": "<range>", "status": "normal|high|low", "date": "<date>"}],
+  "primaryComplaint": "<chief complaint>",
+  "surgicalHistory": ["<surgery 1>", ...],
+  "familyHistory": ["<history 1>", ...],
+  "socialHistory": [{"label": "<label>", "value": "<value>"}],
+  "immunizations": [{"name": "<vaccine>", "date": "<date>"}],
+  "hospitalRouting": {"facility": "<facility>", "reason": "<reason>", "distance": "<distance>"}
+}
+
+Return ONLY the JSON object, no markdown or explanation.`;
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json" },
+        }),
+      }
+    );
+    const data = await res.json();
+    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (raw) {
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        callData.patientDocument = JSON.parse(jsonMatch[0]);
+      }
+    }
+  } catch {
+    // Patient document generation failed
+  }
+}
+
 export async function POST() {
-  // Initialize processing steps
   callData.status = "processing";
   callData.processingSteps = [
     { id: "phone", label: "Detecting caller phone number", status: "pending", detail: null },
@@ -19,13 +107,14 @@ export async function POST() {
     { id: "lookup", label: "Looking up patient in records", status: "pending", detail: null },
     { id: "memv", label: "Pulling patient history from Mem[v]", status: "pending", detail: null },
     { id: "summary", label: "Generating call summary", status: "pending", detail: null },
-    { id: "dashboard", label: "Updating dashboard with live data", status: "pending", detail: null },
+    { id: "document", label: "Generating patient document", status: "pending", detail: null },
+    { id: "orchestrate", label: "Launching multi-agent orchestration", status: "pending", detail: null },
   ];
 
   try {
     // Step 1: Phone number
     setStep("phone", "active");
-    await sleep(600);
+    await sleep(400);
 
     const phone = callData.callerPhone;
     if (phone) {
@@ -36,7 +125,7 @@ export async function POST() {
 
     // Step 2: Analyze transcript
     setStep("transcript", "active");
-    await sleep(400);
+    await sleep(300);
 
     const fullTranscript = callData.transcript
       .map((t) => `${t.role}: ${t.text}`)
@@ -50,7 +139,7 @@ export async function POST() {
 
     // Step 3: Look up patient
     setStep("lookup", "active");
-    await sleep(500);
+    await sleep(300);
 
     let patientFound = false;
     let patientName = extractedName || "";
@@ -59,7 +148,6 @@ export async function POST() {
     let patientId = "";
     let patientPhone = phone || "";
 
-    // Try phone lookup first
     if (phone) {
       const result = lookupByPhone(phone);
       if (result.indexEntry) {
@@ -73,7 +161,6 @@ export async function POST() {
       }
     }
 
-    // Try name lookup if phone didn't work
     if (!patientFound && extractedName) {
       const result = lookupByName(extractedName);
       if (result.indexEntry) {
@@ -105,8 +192,7 @@ export async function POST() {
     if (memories.length > 0) {
       setStep("memv", "done", `${memories.length} memories retrieved`);
     } else {
-      // Use local data as fallback
-      setStep("memv", "done", "Using local patient records");
+      setStep("memv", "done", "No prior memories found");
       if (patientIssue) {
         memories = [`${patientName} reporting: ${patientIssue}`];
       }
@@ -123,13 +209,13 @@ export async function POST() {
       primary_complaint: patientIssue || callData.extracted.situation,
     };
 
-    // Step 5: Generate summary with full context
+    // Step 5: Generate summary with Gemini
     setStep("summary", "active");
 
-    if (process.env.GOOGLE_GEMINI_API_KEY && fullTranscript) {
+    if (GEMINI_KEY && fullTranscript) {
       try {
         const summaryRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GOOGLE_GEMINI_API_KEY}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -181,10 +267,15 @@ Be concise and clinical. Plain text, no markdown.`,
 
     setStep("summary", "done", "Summary generated");
 
-    // Step 6: Dashboard update
-    setStep("dashboard", "active");
-    await sleep(400);
-    setStep("dashboard", "done", "Dashboard updated with call data");
+    // Step 6: Generate patient document with Gemini
+    setStep("document", "active");
+    await generatePatientDocument();
+    setStep("document", "done", callData.patientDocument ? "Patient document generated" : "Document generation skipped");
+
+    // Step 7: Launch orchestration in background
+    setStep("orchestrate", "active");
+    triggerOrchestration(); // Fire and forget
+    setStep("orchestrate", "done", "15-agent orchestration launched");
 
     callData.status = "complete";
 

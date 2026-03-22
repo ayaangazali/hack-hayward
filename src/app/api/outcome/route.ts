@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { MOCK_OUTCOME } from "@/lib/mockData";
 import { callStore } from "@/lib/callStore";
 
 export async function POST(req: NextRequest) {
   const { callId, task, patientProfile } = await req.json();
 
-  // Get transcript from call store
   const call = callStore.get(callId);
   const transcript = call?.transcript.join("\n") || "";
 
   if (!process.env.GOOGLE_GEMINI_API_KEY) {
-    await new Promise((r) => setTimeout(r, 800));
-    return NextResponse.json({ ...MOCK_OUTCOME, transcript });
+    return NextResponse.json({ error: "GOOGLE_GEMINI_API_KEY not configured" }, { status: 500 });
   }
 
   try {
@@ -49,9 +46,9 @@ Return only valid JSON.`;
         const parsed = JSON.parse(jsonMatch[0]);
         return NextResponse.json({ ...parsed, transcript });
       }
-      return NextResponse.json({ ...MOCK_OUTCOME, transcript });
+      return NextResponse.json({ error: "Failed to parse outcome response" }, { status: 500 });
     }
-  } catch {
-    return NextResponse.json({ ...MOCK_OUTCOME, transcript });
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }

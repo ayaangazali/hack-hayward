@@ -16,6 +16,43 @@ type PatientRecord = {
   primary_complaint: string | null;
 };
 
+type AgentResult = {
+  id: string;
+  name: string;
+  model: string;
+  wave: number;
+  type: string;
+  confidence: number;
+  finding: string;
+  details: string[];
+  duration: number;
+  status: "pending" | "running" | "complete" | "error";
+};
+
+type DiagnosisSummary = {
+  primary: string;
+  confidence: number;
+  riskLevel: string;
+  differentials: { diagnosis: string; probability: number; status: string }[];
+  treatments: { action: string; priority: string; timeframe: string }[];
+  referrals: { specialty: string; urgency: string; timeframe: string }[];
+  agentCount: number;
+  modelsUsed: string[];
+  totalDuration: number;
+} | null;
+
+type Procedure = {
+  title: string;
+  source: string;
+  desc: string;
+  details: string[];
+};
+
+type Cause = {
+  title: string;
+  items: string[];
+};
+
 type CallData = {
   transcript: Array<{ role: "user" | "assistant"; text: string; timestamp: number }>;
   summary: string | null;
@@ -33,6 +70,14 @@ type CallData = {
   patient: PatientRecord | null;
   processingSteps: ProcessingStep[];
   rawEvents: Array<{ type: string; payload: unknown; timestamp: number }>;
+  // Orchestration fields
+  agentResults: AgentResult[];
+  diagnosisSummary: DiagnosisSummary;
+  orchestrationStatus: "idle" | "running" | "complete" | "error";
+  orchestrationProgress: number;
+  procedures: Procedure[];
+  causes: Cause[];
+  patientDocument: Record<string, unknown> | null;
 };
 
 const defaultCallData: CallData = {
@@ -52,18 +97,30 @@ const defaultCallData: CallData = {
   patient: null,
   processingSteps: [],
   rawEvents: [],
+  agentResults: [],
+  diagnosisSummary: null,
+  orchestrationStatus: "idle",
+  orchestrationProgress: 0,
+  procedures: [],
+  causes: [],
+  patientDocument: null,
 };
 
 const globalForStore = globalThis as unknown as { __callData?: CallData };
 
 if (!globalForStore.__callData) {
-  globalForStore.__callData = {
-    ...defaultCallData,
-    extracted: { ...defaultCallData.extracted },
-    rawEvents: [],
-    processingSteps: [],
-  };
+  globalForStore.__callData = { ...defaultCallData, extracted: { ...defaultCallData.extracted }, rawEvents: [], processingSteps: [], agentResults: [], procedures: [], causes: [] };
 }
 
-export const callData: CallData = globalForStore.__callData;
-export type { CallData, ProcessingStep, PatientRecord };
+// Ensure existing store has new fields (hot reload compat)
+const store = globalForStore.__callData;
+if (!store.agentResults) store.agentResults = [];
+if (!store.diagnosisSummary) store.diagnosisSummary = null;
+if (!store.orchestrationStatus) store.orchestrationStatus = "idle";
+if (store.orchestrationProgress === undefined) store.orchestrationProgress = 0;
+if (!store.procedures) store.procedures = [];
+if (!store.causes) store.causes = [];
+if (store.patientDocument === undefined) store.patientDocument = null;
+
+export const callData: CallData = store;
+export type { CallData, ProcessingStep, PatientRecord, AgentResult, DiagnosisSummary, Procedure, Cause };

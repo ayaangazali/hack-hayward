@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { MOCK_SCRIPT } from "@/lib/mockData";
 
 export async function POST(req: NextRequest) {
   const { task, research, profile } = await req.json();
 
   if (!process.env.GOOGLE_GEMINI_API_KEY) {
-    await new Promise((r) => setTimeout(r, 1000));
-    return NextResponse.json(MOCK_SCRIPT);
+    return NextResponse.json({ error: "GOOGLE_GEMINI_API_KEY not configured" }, { status: 500 });
   }
 
   try {
@@ -43,14 +41,13 @@ Return only valid JSON, no markdown.`;
       const parsed = JSON.parse(text);
       return NextResponse.json(parsed);
     } catch {
-      // Try to extract JSON from the response
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         return NextResponse.json(JSON.parse(jsonMatch[0]));
       }
-      return NextResponse.json(MOCK_SCRIPT);
+      return NextResponse.json({ error: "Failed to parse script response" }, { status: 500 });
     }
-  } catch {
-    return NextResponse.json(MOCK_SCRIPT);
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }
